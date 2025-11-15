@@ -1,51 +1,13 @@
 import express from 'express';
-import fs from 'fs/promises';
-import fsSync from 'fs';
-import path from 'path';
+import Order from '../../models/Order.js'; // ADD THIS IMPORT
 import { authenticateClerk, requireAdmin } from '../../middleware/clerkAuth.js';
 
 const router = express.Router();
-const dataFilePath = path.join(process.cwd(), 'data', 'orders.json');
-
-function ensureDataFile() {
-  const dataDir = path.join(process.cwd(), 'data');
-  if (!fsSync.existsSync(dataDir)) {
-    fsSync.mkdirSync(dataDir, { recursive: true });
-  }
-  if (!fsSync.existsSync(dataFilePath)) {
-    fsSync.writeFileSync(dataFilePath, JSON.stringify([], null, 2));
-  }
-}
-
-async function readOrders() {
-  try {
-    ensureDataFile();
-    const data = await fs.readFile(dataFilePath, 'utf-8');
-    return JSON.parse(data);
-  } catch (err) {
-    console.error('Error reading orders:', err);
-    return [];
-  }
-}
-
-async function writeOrders(orders) {
-  try {
-    ensureDataFile();
-    await fs.writeFile(dataFilePath, JSON.stringify(orders, null, 2));
-  } catch (err) {
-    console.error('Error writing orders:', err);
-    throw new Error('Failed to save orders');
-  }
-}
-
-// Simple in-memory cache with TTL
-const cache = new Map();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 
 // Apply Clerk authentication and admin authorization for all routes
 router.use(authenticateClerk, requireAdmin);
 
-// GET all orders with filtering, pagination, and sorting
+// GET all orders with filtering, pagination, and sorting - USING MONGODB
 router.get('/', async (req, res, next) => {
   try {
     const { 
@@ -59,187 +21,193 @@ router.get('/', async (req, res, next) => {
       paymentMethod 
     } = req.query;
 
-    // Create cache key based on query parameters
-    const cacheKey = `orders:${status}:${page}:${limit}:${sortBy}:${sortOrder}:${search}:${customerEmail}:${paymentMethod}`;
-    const cached = cache.get(cacheKey);
-    
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return res.json(cached.data);
-    }
+    console.log('📦 Fetching orders from MongoDB...');
 
-    let orders = await readOrders();
+    // Build query for MongoDB
+    let query = {};
 
     // Apply filters
     if (status && status !== 'all') {
-      orders = orders.filter(order => order.status === status);
+      query.status = status;
     }
 
     if (paymentMethod && paymentMethod !== 'all') {
-      orders = orders.filter(order => order.paymentMethod === paymentMethod);
+      query.paymentMethod = paymentMethod;
     }
 
     if (customerEmail) {
-      orders = orders.filter(order => 
-        order.customerInfo?.email?.toLowerCase().includes(customerEmail.toLowerCase())
-      );
+      query.$or = [
+        { 'guestCustomer.email': { $regex: customerEmail, $options: 'i' } },
+        { 'user.email': { $regex: customerEmail, $options: 'i' } }
+      ];
     }
 
     if (search) {
-      const searchLower = search.toLowerCase();
-      orders = orders.filter(order => 
-        order.orderNumber?.toLowerCase().includes(searchLower) ||
-        order.customerInfo?.fullName?.toLowerCase().includes(searchLower) ||
-        order.customerInfo?.email?.toLowerCase().includes(searchLower) ||
-        order.customerInfo?.phone?.includes(search)
-      );
+      const searchRegex = { $regex: search, $options: 'i' };
+      query.$or = [
+        { orderNumber: searchRegex },
+        { 'guestCustomer.fullName': searchRegex },
+        { 'guestCustomer.email': searchRegex },
+        { 'guestCustomer.phone': searchRegex },
+        { 'user.firstName': searchRegex },
+        { 'user.lastName': searchRegex },
+        { 'user.email': searchRegex }
+      ];
     }
 
-    // Apply sorting
-    orders.sort((a, b) => {
-      const aVal = a[sortBy];
-      const bVal = b[sortBy];
-      
-      if (sortOrder === 'asc') {
-        return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
-      } else {
-        return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
-      }
-    });
+    // Build sort object
+    const sortObj = {};
+    sortObj[sortBy] = sortOrder === 'asc' ? 1 : -1;
 
-    // Apply pagination
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + parseInt(limit);
-    const paginatedOrders = orders.slice(startIndex, endIndex);
+    // Execute query with population
+    const orders = await Order.find(query)
+      .populate('user', 'firstName lastName email phone') // Populate user data
+      .populate('products.product', 'name images price') // Populate product data
+      .sort(sortObj)
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .lean(); // Convert to plain objects
+
+    // Get total count for pagination
+    const totalOrders = await Order.countDocuments(query);
+
+    console.log(`📦 Found ${orders.length} orders from MongoDB`);
 
     // Calculate summary statistics
-    const totalRevenue = orders
-      .filter(order => order.status === 'delivered')
-      .reduce((sum, order) => sum + (order.total || 0), 0);
+    const allOrders = await Order.find(query).lean();
+    const totalRevenue = allOrders
+      .filter(order => order.status === 'Delivered' || order.status === 'delivered')
+      .reduce((sum, order) => sum + (order.totalAmount || 0), 0);
 
-    const statusCounts = orders.reduce((acc, order) => {
-      acc[order.status] = (acc[order.status] || 0) + 1;
+    const statusCounts = allOrders.reduce((acc, order) => {
+      const status = order.status || 'Pending';
+      acc[status] = (acc[status] || 0) + 1;
       return acc;
     }, {});
 
     const response = {
-      orders: paginatedOrders,
+      success: true,
+      orders: orders,
       pagination: {
         currentPage: parseInt(page),
-        totalPages: Math.ceil(orders.length / limit),
-        totalOrders: orders.length,
-        hasNext: endIndex < orders.length,
-        hasPrev: startIndex > 0
+        totalPages: Math.ceil(totalOrders / limit),
+        totalOrders: totalOrders,
+        hasNext: (page * limit) < totalOrders,
+        hasPrev: page > 1
       },
       summary: {
         totalRevenue: Math.round(totalRevenue * 100) / 100,
         statusCounts,
-        averageOrderValue: orders.length > 0 ? Math.round(totalRevenue / orders.length * 100) / 100 : 0
+        averageOrderValue: allOrders.length > 0 ? Math.round(totalRevenue / allOrders.length * 100) / 100 : 0,
+        guestOrders: allOrders.filter(o => o.guestCustomer).length,
+        userOrders: allOrders.filter(o => o.user).length
       },
       metadata: {
-        cached: false,
+        source: 'mongodb',
         generatedAt: new Date().toISOString(),
         filters: { status, paymentMethod, customerEmail, search }
       }
     };
 
-    // Cache the response
-    cache.set(cacheKey, {
-      data: response,
-      timestamp: Date.now()
-    });
-
     return res.json(response);
   } catch (err) {
+    console.error('❌ Error fetching orders from MongoDB:', err);
     next(err);
   }
 });
 
-// GET order by ID
+// GET order by ID - USING MONGODB
 router.get('/:id', async (req, res, next) => {
   try {
-    const orders = await readOrders();
-    const order = orders.find(o => o.id === req.params.id || o._id === req.params.id);
+    console.log(`📦 Fetching order ${req.params.id} from MongoDB...`);
+    
+    const order = await Order.findById(req.params.id)
+      .populate('user', 'firstName lastName email phone')
+      .populate('products.product', 'name images price');
     
     if (!order) {
-      return res.status(404).json({ error: 'Order not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Order not found' 
+      });
     }
 
-    return res.json({ order });
+    return res.json({ 
+      success: true,
+      order 
+    });
   } catch (err) {
+    console.error('❌ Error fetching order from MongoDB:', err);
     next(err);
   }
 });
 
-// PUT update order status
+// PUT update order status - USING MONGODB
 router.put('/:id/status', async (req, res, next) => {
   try {
     const { status, adminNotes, trackingNumber, shippingProvider } = req.body;
     
-    // Validate status
-    const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: 'Invalid order status' });
-    }
-
-    const orders = await readOrders();
-    const index = orders.findIndex(o => o.id === req.params.id || o._id === req.params.id);
+    console.log(`🔄 Updating order ${req.params.id} status to ${status}`);
     
-    if (index === -1) {
-      return res.status(404).json({ error: 'Order not found' });
+    // Validate status
+    const validStatuses = ['Pending', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Invalid order status' 
+      });
     }
 
-    // Update order with status history
-    const previousStatus = orders[index].status;
-    const updateData = {
-      status,
-      updatedAt: new Date().toISOString(),
-      ...(adminNotes && { adminNotes }),
-      ...(trackingNumber && { trackingNumber }),
-      ...(shippingProvider && { shippingProvider })
-    };
-
-    // Initialize status history if it doesn't exist
-    if (!orders[index].statusHistory) {
-      orders[index].statusHistory = [];
+    const order = await Order.findById(req.params.id);
+    
+    if (!order) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Order not found' 
+      });
     }
 
-    // Add status change to history
-    orders[index].statusHistory.push({
-      status,
-      changedAt: new Date().toISOString(),
-      changedBy: req.user.id,
-      notes: adminNotes,
-      previousStatus
-    });
+    // Update order
+    const previousStatus = order.status;
+    order.status = status;
+    order.updatedAt = new Date();
+    
+    if (adminNotes) order.adminNotes = adminNotes;
+    if (trackingNumber) order.trackingNumber = trackingNumber;
+    if (shippingProvider) order.shippingProvider = shippingProvider;
 
-    orders[index] = { ...orders[index], ...updateData };
+    await order.save();
 
-    await writeOrders(orders);
-
-    // Clear relevant cache entries
-    cache.clear();
+    // Populate the updated order for response
+    const updatedOrder = await Order.findById(req.params.id)
+      .populate('user', 'firstName lastName email phone')
+      .populate('products.product', 'name images price');
 
     return res.json({
+      success: true,
       message: 'Order updated successfully',
-      order: orders[index],
+      order: updatedOrder,
       statusChange: {
         from: previousStatus,
         to: status
       }
     });
   } catch (err) {
+    console.error('❌ Error updating order status in MongoDB:', err);
     next(err);
   }
 });
 
-// PUT update order details (bulk update)
+// PUT update order details (bulk update) - USING MONGODB
 router.put('/:id', async (req, res, next) => {
   try {
-    const orders = await readOrders();
-    const index = orders.findIndex(o => o.id === req.params.id || o._id === req.params.id);
+    const order = await Order.findById(req.params.id);
     
-    if (index === -1) {
-      return res.status(404).json({ error: 'Order not found' });
+    if (!order) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Order not found' 
+      });
     }
 
     // Define allowed fields for update
@@ -248,214 +216,206 @@ router.put('/:id', async (req, res, next) => {
       'trackingNumber', 
       'shippingProvider', 
       'shippingInfo',
-      'customerInfo'
+      'guestCustomer'
     ];
 
-    const updateData = {};
     allowedFields.forEach(field => {
       if (req.body[field] !== undefined) {
-        updateData[field] = req.body[field];
+        order[field] = req.body[field];
       }
     });
 
-    orders[index] = {
-      ...orders[index],
-      ...updateData,
-      updatedAt: new Date().toISOString()
-    };
+    order.updatedAt = new Date();
+    await order.save();
 
-    await writeOrders(orders);
-
-    // Clear cache
-    cache.clear();
+    // Populate the updated order
+    const updatedOrder = await Order.findById(req.params.id)
+      .populate('user', 'firstName lastName email phone')
+      .populate('products.product', 'name images price');
 
     return res.json({
+      success: true,
       message: 'Order updated successfully',
-      order: orders[index]
+      order: updatedOrder
     });
   } catch (err) {
+    console.error('❌ Error updating order in MongoDB:', err);
     next(err);
   }
 });
 
-// DELETE order
+// DELETE order - USING MONGODB
 router.delete('/:id', async (req, res, next) => {
   try {
-    const orders = await readOrders();
-    const orderIndex = orders.findIndex(o => o.id === req.params.id || o._id === req.params.id);
+    const order = await Order.findByIdAndDelete(req.params.id);
     
-    if (orderIndex === -1) {
-      return res.status(404).json({ error: 'Order not found' });
+    if (!order) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Order not found' 
+      });
     }
 
-    const deletedOrder = orders[orderIndex];
-    orders.splice(orderIndex, 1);
-    
-    await writeOrders(orders);
-
-    // Clear cache
-    cache.clear();
-
     return res.json({ 
+      success: true,
       message: 'Order deleted successfully',
       deletedOrder: {
-        id: deletedOrder.id || deletedOrder._id,
-        orderNumber: deletedOrder.orderNumber,
-        customerName: deletedOrder.customerInfo?.fullName
+        id: order._id,
+        orderNumber: order.orderNumber,
+        customerName: order.guestCustomer?.fullName || (order.user ? `${order.user.firstName} ${order.user.lastName}` : 'Unknown')
       }
     });
   } catch (err) {
+    console.error('❌ Error deleting order from MongoDB:', err);
     next(err);
   }
 });
 
-// POST bulk status update
+// POST bulk status update - USING MONGODB
 router.post('/bulk-status', async (req, res, next) => {
   try {
     const { orderIds, status, adminNotes } = req.body;
 
     if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
-      return res.status(400).json({ error: 'Order IDs are required' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Order IDs are required' 
+      });
     }
 
     if (!status) {
-      return res.status(400).json({ error: 'Status is required' });
-    }
-
-    const validStatuses = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: 'Invalid order status' });
-    }
-
-    const orders = await readOrders();
-    const updatedOrders = [];
-    const notFoundOrders = [];
-
-    orderIds.forEach(orderId => {
-      const index = orders.findIndex(o => o.id === orderId || o._id === orderId);
-      
-      if (index === -1) {
-        notFoundOrders.push(orderId);
-        return;
-      }
-
-      const previousStatus = orders[index].status;
-      
-      // Initialize status history if it doesn't exist
-      if (!orders[index].statusHistory) {
-        orders[index].statusHistory = [];
-      }
-
-      // Add status change to history
-      orders[index].statusHistory.push({
-        status,
-        changedAt: new Date().toISOString(),
-        changedBy: req.user.id,
-        notes: adminNotes,
-        previousStatus
+      return res.status(400).json({ 
+        success: false,
+        error: 'Status is required' 
       });
-
-      orders[index] = {
-        ...orders[index],
-        status,
-        updatedAt: new Date().toISOString(),
-        ...(adminNotes && { adminNotes })
-      };
-
-      updatedOrders.push(orders[index]);
-    });
-
-    if (updatedOrders.length > 0) {
-      await writeOrders(orders);
     }
 
-    // Clear cache
-    cache.clear();
+    const validStatuses = ['Pending', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Invalid order status' 
+      });
+    }
+
+    const updateResult = await Order.updateMany(
+      { _id: { $in: orderIds } },
+      { 
+        $set: { 
+          status: status,
+          updatedAt: new Date(),
+          ...(adminNotes && { adminNotes })
+        }
+      }
+    );
+
+    // Fetch updated orders
+    const updatedOrders = await Order.find({ _id: { $in: orderIds } })
+      .populate('user', 'firstName lastName email phone')
+      .populate('products.product', 'name images price');
 
     return res.json({
-      message: `Updated ${updatedOrders.length} orders successfully`,
-      updatedCount: updatedOrders.length,
-      notFoundCount: notFoundOrders.length,
-      notFoundOrders,
+      success: true,
+      message: `Updated ${updateResult.modifiedCount} orders successfully`,
+      updatedCount: updateResult.modifiedCount,
       updatedOrders: updatedOrders.map(order => ({
-        id: order.id || order._id,
+        id: order._id,
         orderNumber: order.orderNumber,
         status: order.status,
-        customerName: order.customerInfo?.fullName
+        customerName: order.guestCustomer?.fullName || (order.user ? `${order.user.firstName} ${order.user.lastName}` : 'Unknown')
       }))
     });
   } catch (err) {
+    console.error('❌ Error bulk updating orders in MongoDB:', err);
     next(err);
   }
 });
 
-// GET order statistics
+// GET order statistics - USING MONGODB
 router.get('/stats/summary', async (req, res, next) => {
   try {
-    const cacheKey = 'orders:stats:summary';
-    const cached = cache.get(cacheKey);
-    
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return res.json(cached.data);
-    }
+    console.log('📊 Fetching order statistics from MongoDB...');
 
-    const orders = await readOrders();
-    
-    const totalOrders = orders.length;
-    const totalRevenue = orders
-      .filter(order => order.status === 'delivered')
-      .reduce((sum, order) => sum + (order.total || 0), 0);
+    const totalOrders = await Order.countDocuments();
+    const guestOrders = await Order.countDocuments({ guestCustomer: { $exists: true } });
+    const userOrders = await Order.countDocuments({ user: { $exists: true } });
 
-    const statusCounts = orders.reduce((acc, order) => {
-      acc[order.status] = (acc[order.status] || 0) + 1;
-      return acc;
-    }, {});
+    // Calculate revenue from delivered orders
+    const deliveredOrders = await Order.find({ 
+      $or: [
+        { status: 'Delivered' },
+        { status: 'delivered' }
+      ]
+    });
+    const totalRevenue = deliveredOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
 
-    const paymentMethodCounts = orders.reduce((acc, order) => {
-      const method = order.paymentMethod || 'unknown';
-      acc[method] = (acc[method] || 0) + 1;
-      return acc;
-    }, {});
+    // Status counts
+    const statusCounts = await Order.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Convert to object format
+    const statusCountsObj = {};
+    statusCounts.forEach(item => {
+      statusCountsObj[item._id] = item.count;
+    });
+
+    // Payment method counts
+    const paymentMethodCounts = await Order.aggregate([
+      {
+        $group: {
+          _id: '$paymentMethod',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const paymentMethodCountsObj = {};
+    paymentMethodCounts.forEach(item => {
+      paymentMethodCountsObj[item._id] = item.count;
+    });
 
     // Recent orders (last 7 days)
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-    const recentOrders = orders.filter(order => 
-      new Date(order.createdAt || order.updatedAt) > oneWeekAgo
-    ).length;
+    const recentOrders = await Order.countDocuments({
+      createdAt: { $gte: oneWeekAgo }
+    });
 
     const response = {
+      success: true,
       totalOrders,
+      guestOrders,
+      userOrders,
       totalRevenue: Math.round(totalRevenue * 100) / 100,
       averageOrderValue: totalOrders > 0 ? Math.round(totalRevenue / totalOrders * 100) / 100 : 0,
-      statusCounts,
-      paymentMethodCounts,
+      statusCounts: statusCountsObj,
+      paymentMethodCounts: paymentMethodCountsObj,
       recentOrders,
       metadata: {
-        cached: false,
+        source: 'mongodb',
         generatedAt: new Date().toISOString()
       }
     };
 
-    // Cache the response
-    cache.set(cacheKey, {
-      data: response,
-      timestamp: Date.now()
-    });
-
+    console.log('📊 Order statistics:', response);
     return res.json(response);
   } catch (err) {
+    console.error('❌ Error fetching order statistics from MongoDB:', err);
     next(err);
   }
 });
 
-// Clear cache endpoint
+// Clear cache endpoint (kept for compatibility, but cache is removed)
 router.delete('/cache/clear', (req, res) => {
-  const deletedCount = cache.size;
-  cache.clear();
   res.json({ 
-    message: 'Order cache cleared successfully', 
-    deletedEntries: deletedCount 
+    success: true,
+    message: 'Cache system removed - now using direct MongoDB queries' 
   });
 });
 

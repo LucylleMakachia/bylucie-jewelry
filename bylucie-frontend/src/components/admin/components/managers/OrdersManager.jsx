@@ -41,6 +41,9 @@ const OrdersManager = ({ orders, onUpdateOrderStatus, onRefreshOrders }) => {
     if (order.guestCustomer?.phone) {
       return order.guestCustomer.phone;
     }
+    if (order.user?.phone) {
+      return order.user.phone;
+    }
     return 'No phone';
   };
 
@@ -85,6 +88,7 @@ const OrdersManager = ({ orders, onUpdateOrderStatus, onRefreshOrders }) => {
       case 'processing': return 'bg-blue-100 text-blue-800';
       case 'shipped': return 'bg-purple-100 text-purple-800';
       case 'delivered': return 'bg-green-100 text-green-800';
+      case 'completed': return 'bg-green-100 text-green-800';
       case 'cancelled': return 'bg-red-100 text-red-800';
       default: return 'bg-gray-100 text-gray-800';
     }
@@ -125,6 +129,19 @@ const OrdersManager = ({ orders, onUpdateOrderStatus, onRefreshOrders }) => {
     if (product.price) return product.price;
     if (product.product?.price) return product.product.price;
     return 0;
+  };
+
+  // Get product image
+  const getProductImage = (product) => {
+    if (product.productImage) return product.productImage;
+    if (product.imageUrl) return product.imageUrl;
+    if (product.images && product.images.length > 0) {
+      return typeof product.images[0] === 'string' ? product.images[0] : product.images[0].url;
+    }
+    if (product.product?.images && product.product.images.length > 0) {
+      return typeof product.product.images[0] === 'string' ? product.product.images[0] : product.product.images[0].url;
+    }
+    return '/images/placeholder.jpg';
   };
 
   // Get order statistics
@@ -251,24 +268,32 @@ const OrdersManager = ({ orders, onUpdateOrderStatus, onRefreshOrders }) => {
                   {/* Order Items */}
                   <div className="mb-4">
                     <h5 className="font-semibold text-gray-900 mb-2">Order Items</h5>
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {order.products?.map((item, index) => (
-                        <div key={index} className="flex justify-between items-center py-2 border-b border-gray-200">
+                        <div key={index} className="flex items-center space-x-4 py-3 border-b border-gray-200">
+                          <img 
+                            src={getProductImage(item)} 
+                            alt={getProductName(item)}
+                            className="w-16 h-16 object-cover rounded-lg border border-gray-200"
+                            onError={(e) => {
+                              e.target.src = '/images/placeholder.jpg';
+                            }}
+                          />
                           <div className="flex-1">
-                            <div className="font-medium">{getProductName(item)}</div>
-                            <div className="text-sm text-gray-600">
-                              Qty: {item.quantity} × KSH {getProductPrice(item).toFixed(2)}
+                            <div className="font-medium text-gray-900">{getProductName(item)}</div>
+                            <div className="text-sm text-gray-600 mt-1">
+                              Qty: {item.quantity || 1} × KSH {getProductPrice(item).toFixed(2)}
                             </div>
                           </div>
-                          <div className="font-semibold">
+                          <div className="font-semibold text-gray-900">
                             KSH {(getProductPrice(item) * (item.quantity || 1)).toFixed(2)}
                           </div>
                         </div>
                       ))}
                     </div>
-                    <div className="flex justify-between items-center pt-2 border-t border-gray-300 font-semibold">
-                      <span>Total:</span>
-                      <span>KSH {calculateOrderTotal(order).toFixed(2)}</span>
+                    <div className="flex justify-between items-center pt-4 border-t border-gray-300 font-semibold text-lg">
+                      <span className="text-gray-900">Total Amount:</span>
+                      <span className="text-[#b8860b]">KSH {calculateOrderTotal(order).toFixed(2)}</span>
                     </div>
                   </div>
 
@@ -298,6 +323,11 @@ const OrdersManager = ({ orders, onUpdateOrderStatus, onRefreshOrders }) => {
                           <strong>Payment:</strong> {order.paymentMethod}
                         </div>
                       )}
+                      {order.pickupLocationId && (
+                        <div>
+                          <strong>Pickup Location:</strong> {order.pickupLocationId}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -314,6 +344,7 @@ const OrdersManager = ({ orders, onUpdateOrderStatus, onRefreshOrders }) => {
                       <option value="processing">Processing</option>
                       <option value="shipped">Shipped</option>
                       <option value="delivered">Delivered</option>
+                      <option value="completed">Completed</option>
                       <option value="cancelled">Cancelled</option>
                     </select>
                     {updatingOrder === (order._id || order.id) && (

@@ -185,15 +185,6 @@ function App() {
     </div>
   );
 
-  // Show loading state for authentication
-  if (!isLoaded) {
-    return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="text-lg">Loading authentication...</div>
-      </div>
-    );
-  }
-
   // Common props for product-related components
   const commonProductProps = {
     products,
@@ -202,6 +193,77 @@ function App() {
     user
   };
 
+  // Show products immediately, auth will load in background
+  if (!isLoaded) {
+    // Return the full app structure but auth-dependent features won't work yet
+    return (
+      <I18nextProvider i18n={i18n}>
+        <CurrencyProvider>
+          <CartProvider>
+            <Layout>
+              <Suspense fallback={<LoadingFallback />}>
+                <Routes>
+                  {/* Public routes work immediately */}
+                  <Route path="/" element={<Home />} />
+                  <Route path="/about" element={<About />} />
+                  <Route path="/contact" element={<Contact />} />
+                  <Route path="/terms" element={<Terms />} />
+                  <Route path="/privacy" element={<Privacy />} />
+                  <Route path="/cart" element={<CartPage />} />
+                  <Route path="/checkout" element={<Checkout />} />
+                  <Route path="/sign-in" element={<SignIn />} />
+                  <Route path="/sign-up" element={<SignUp />} />
+                  <Route path="/verify" element={<Verify />} />
+                  <Route path="/unauthorized" element={<UnauthorizedPage />} />
+                  <Route path="/access-denied" element={<AccessDenied />} />
+                  <Route path="/unauthorized-message" element={<UnauthorizedMessage />} />
+
+                  {/* Products routes */}
+                  <Route
+                    path="/products"
+                    element={
+                      loading ? (
+                        <LoadingFallback message="Loading products..." />
+                      ) : error ? (
+                        <ErrorFallback error={error} onRetry={handleRetry} />
+                      ) : (
+                        <Products products={products} getToken={getToken} showToast={showToast} user={null} />
+                      )
+                    }
+                  />
+                  
+                  {/* Product Detail Route */}
+                  <Route 
+                    path="/products/:productId" 
+                    element={
+                      loading ? (
+                        <LoadingFallback message="Loading product details..." />
+                      ) : error ? (
+                        <ErrorFallback error={error} onRetry={handleRetry} />
+                      ) : (
+                        <ProductDetail products={products} getToken={getToken} showToast={showToast} user={null} />
+                      )
+                    } 
+                  />
+
+                  {/* Protected routes show loading or redirect */}
+                  <Route path="/wishlist" element={<LoadingFallback message="Checking authentication..." />} />
+                  <Route path="/profile" element={<LoadingFallback message="Checking authentication..." />} />
+                  <Route path="/settings" element={<LoadingFallback message="Checking authentication..." />} />
+                  <Route path="/admindashboard" element={<LoadingFallback message="Checking authentication..." />} />
+                  
+                  {/* Catch-all route */}
+                  <Route path="*" element={<PageLoader path={location.pathname} />} />
+                </Routes>
+              </Suspense>
+            </Layout>
+          </CartProvider>
+        </CurrencyProvider>
+      </I18nextProvider>
+    );
+  }
+
+  // Once auth is loaded, show the full app with protected routes
   return (
     <I18nextProvider i18n={i18n}>
       <CurrencyProvider>

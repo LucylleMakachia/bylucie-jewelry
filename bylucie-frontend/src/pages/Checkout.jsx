@@ -26,6 +26,14 @@ export default function Checkout() {
   const [orderComplete, setOrderComplete] = useState(false);
   const [productStock, setProductStock] = useState({});
 
+  // Verification states
+  const [requiresVerification, setRequiresVerification] = useState(false);
+  const [verificationStep, setVerificationStep] = useState('method'); // 'method', 'code', 'complete'
+  const [verificationMethod, setVerificationMethod] = useState('email');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [isVerified, setIsVerified] = useState(false);
+  const [verificationLoading, setVerificationLoading] = useState(false);
+
   // Store pickup locations
   const [storeLocations] = useState([
     { id: 'main-store', name: 'Main Store - Nairobi CBD', address: 'Moi Avenue, Nairobi CBD' },
@@ -45,6 +53,13 @@ export default function Checkout() {
   useEffect(() => {
     checkProductStock();
   }, [cartItems]);
+
+  // Check if verification is required
+  useEffect(() => {
+    if (isSignedIn && !isVerified) {
+      setRequiresVerification(true);
+    }
+  }, [isSignedIn, isVerified]);
 
   // Function to check product stock
   const checkProductStock = async () => {
@@ -136,6 +151,88 @@ export default function Checkout() {
     setShippingInfo({ ...shippingInfo, [e.target.name]: e.target.value });
   };
 
+  // Verification functions
+  const sendVerificationCode = async () => {
+    setVerificationLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+      
+      const payload = {
+        method: verificationMethod,
+        email: shippingInfo.email,
+        phone: shippingInfo.phone,
+        isSignedIn,
+        userId: isSignedIn ? userId : null
+      };
+
+      const endpoint = isSignedIn 
+        ? `${API_BASE_URL}/api/auth/send-account-verification`
+        : `${API_BASE_URL}/api/auth/send-guest-verification`;
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        setVerificationStep('code');
+        toast.success(`Verification code sent to your ${verificationMethod}`);
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Failed to send verification code');
+      }
+    } catch (error) {
+      toast.error(`Failed to send verification: ${error.message}`);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const verifyCode = async () => {
+    setVerificationLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+      
+      const payload = {
+        code: verificationCode,
+        method: verificationMethod,
+        email: shippingInfo.email,
+        phone: shippingInfo.phone,
+        isSignedIn,
+        userId: isSignedIn ? userId : null
+      };
+
+      const endpoint = isSignedIn 
+        ? `${API_BASE_URL}/api/auth/verify-account`
+        : `${API_BASE_URL}/api/auth/verify-guest`;
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        setIsVerified(true);
+        setVerificationStep('complete');
+        setRequiresVerification(false);
+        toast.success('Identity verified successfully!');
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Invalid verification code');
+      }
+    } catch (error) {
+      toast.error(`Verification failed: ${error.message}`);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
   const validateStep1 = () => {
     // Check stock before proceeding
     if (hasOutOfStockItems()) {
@@ -225,6 +322,13 @@ export default function Checkout() {
       return;
     }
 
+    // Check if verification is required
+    if ((!isSignedIn && !isVerified) || (isSignedIn && requiresVerification)) {
+      setRequiresVerification(true);
+      toast.info('Identity verification required for order security');
+      return;
+    }
+
     // Final stock check before submitting
     if (hasOutOfStockItems()) {
       const outOfStockItems = getOutOfStockItems();
@@ -235,11 +339,10 @@ export default function Checkout() {
 
     setSubmitting(true);
     try {
-      // FIXED: Use 'items' instead of 'cartItems' to match backend validation
       const orderPayload = {
         items: cartItems.map(item => ({
           id: item.id,
-          productId: item.id, // Include both for compatibility
+          productId: item.id,
           name: item.name,
           price: typeof item.price === 'number' ? item.price : parseFloat(item.price),
           quantity: parseInt(item.quantity),
@@ -258,24 +361,21 @@ export default function Checkout() {
         pickupLocation: deliveryOption === 'store-pickup' ? pickupLocation : null,
         pickupMtaaniLocation: deliveryOption === 'pickupmtaani' ? pickupMtaaniLocation : null,
         paymentMethod,
-        totalAmount: parseFloat(calculateTotal()), // FIXED: Use totalAmount instead of total
+        totalAmount: parseFloat(calculateTotal()),
         orderNumber: generateOrderNumber(),
         status: 'pending',
         createdAt: new Date().toISOString(),
         isGuestOrder: !isSignedIn,
-        userId: isSignedIn ? userId : null
+        userId: isSignedIn ? userId : null,
+        userVerified: isSignedIn ? isVerified : false,
+        verificationMethod: isVerified ? verificationMethod : null
       };
 
       console.log('🔍 DEBUG - Complete order payload being sent:', JSON.stringify(orderPayload, null, 2));
-      console.log('Submitting order to API:', { 
-        isSignedIn, 
-        userId,
-        itemCount: cartItems.length 
-      });
 
       const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
       
-      // 🔒 CRITICAL: Final server-side stock validation to prevent race conditions
+      // Final server-side stock validation
       console.log('🔒 Performing final server-side stock validation...');
       const stockRes = await fetch(`${API_BASE_URL}/api/products/stock-check`, {
         method: 'POST',
@@ -288,7 +388,6 @@ export default function Checkout() {
       if (stockRes.ok) {
         const latestStockData = await stockRes.json();
         
-        // Check if any items became out of stock since we started checkout
         const newlyOutOfStockItems = cartItems.filter(item => {
           const latestStock = latestStockData[item.id];
           return latestStock !== undefined && latestStock < item.quantity;
@@ -300,7 +399,6 @@ export default function Checkout() {
         }
       }
 
-      // Choose the appropriate endpoint based on authentication
       const endpoint = isSignedIn 
         ? `${API_BASE_URL}/api/orders`
         : `${API_BASE_URL}/api/orders/guest`;
@@ -315,7 +413,6 @@ export default function Checkout() {
         body: JSON.stringify(orderPayload),
       });
 
-      // ENHANCED ERROR HANDLING - Get detailed validation errors
       console.log('📋 Response status:', res.status, res.statusText);
       
       if (!res.ok) {
@@ -330,7 +427,6 @@ export default function Checkout() {
           errorData = { error: responseText || 'Unknown server error' };
         }
 
-        // Handle different types of validation errors
         if (errorData.details && Array.isArray(errorData.details)) {
           const validationMessages = errorData.details.map(detail => {
             if (typeof detail === 'string') return detail;
@@ -364,7 +460,6 @@ export default function Checkout() {
     } catch (err) {
       console.error('Order submission error:', err);
       
-      // More user-friendly error messages
       let userMessage = err.message;
       
       if (err.message.includes('Server error') || err.message.includes('unexpected response')) {
@@ -373,7 +468,6 @@ export default function Checkout() {
         userMessage = 'Network error. Please check your connection.';
       } else if (err.message.includes('stock') || err.message.includes('purchased by other customers')) {
         userMessage = err.message;
-        // Refresh stock data to show current availability
         checkProductStock();
       }
       
@@ -381,11 +475,6 @@ export default function Checkout() {
     } finally {
       setSubmitting(false);
     }
-  };
-
-  // Helper function to get Clerk token (if needed)
-  const getClerkToken = async () => {
-    return null; // Placeholder - implement based on your auth setup
   };
 
   const getDeliveryInstructions = () => {
@@ -425,15 +514,141 @@ export default function Checkout() {
     return null;
   };
 
+  // Verification Component
+  const VerificationSection = () => (
+    <div className="bg-white border border-yellow-300 rounded-lg p-6 mb-6">
+      {verificationStep === 'method' && (
+        <>
+          <h3 className="text-lg font-semibold text-yellow-800 mb-3">
+            🔒 Identity Verification Required
+          </h3>
+          <p className="text-yellow-700 mb-4">
+            {isSignedIn 
+              ? 'For security reasons, we need to verify your identity before processing orders.'
+              : 'Please verify your identity to complete your guest order.'
+            }
+          </p>
+
+          <div className="space-y-3 mb-4">
+            <label className="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+              <input
+                type="radio"
+                name="verificationMethod"
+                value="email"
+                checked={verificationMethod === 'email'}
+                onChange={(e) => setVerificationMethod(e.target.value)}
+                className="mr-3"
+              />
+              <div>
+                <span className="font-semibold">Email Verification</span>
+                <p className="text-sm text-gray-600">Send code to {shippingInfo.email}</p>
+              </div>
+            </label>
+
+            <label className="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+              <input
+                type="radio"
+                name="verificationMethod"
+                value="phone"
+                checked={verificationMethod === 'phone'}
+                onChange={(e) => setVerificationMethod(e.target.value)}
+                className="mr-3"
+              />
+              <div>
+                <span className="font-semibold">SMS Verification</span>
+                <p className="text-sm text-gray-600">Send code to {shippingInfo.phone}</p>
+              </div>
+            </label>
+          </div>
+
+          <button
+            onClick={sendVerificationCode}
+            disabled={verificationLoading}
+            className="w-full bg-[#b8860b] text-white py-3 rounded-lg hover:bg-[#997500] transition disabled:opacity-50"
+          >
+            {verificationLoading ? 'Sending...' : `Send ${verificationMethod.toUpperCase()} Verification`}
+          </button>
+        </>
+      )}
+
+      {verificationStep === 'code' && (
+        <>
+          <h3 className="text-lg font-semibold text-blue-800 mb-3">
+            Enter Verification Code
+          </h3>
+          <p className="text-blue-700 mb-4">
+            We sent a 6-digit code to your {verificationMethod}
+          </p>
+
+          <div className="space-y-4">
+            <input
+              type="text"
+              value={verificationCode}
+              onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              className="w-full p-4 text-center text-2xl font-semibold tracking-widest border-2 border-[#b8860b] rounded-lg focus:outline-none focus:border-[#ff8c00]"
+              placeholder="000000"
+              maxLength={6}
+            />
+            
+            <div className="flex space-x-3">
+              <button
+                onClick={() => setVerificationStep('method')}
+                className="flex-1 py-3 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
+              >
+                Back
+              </button>
+              <button
+                onClick={verifyCode}
+                disabled={verificationLoading || verificationCode.length !== 6}
+                className="flex-1 bg-[#b8860b] text-white py-3 rounded-lg hover:bg-[#997500] transition disabled:opacity-50"
+              >
+                {verificationLoading ? 'Verifying...' : 'Verify Code'}
+              </button>
+            </div>
+
+            <button
+              onClick={sendVerificationCode}
+              disabled={verificationLoading}
+              className="w-full text-[#b8860b] hover:text-[#997500] font-semibold transition disabled:opacity-50"
+            >
+              Resend Code
+            </button>
+          </div>
+        </>
+      )}
+
+      {verificationStep === 'complete' && (
+        <div className="text-center">
+          <div className="text-green-600 text-4xl mb-3">✅</div>
+          <h3 className="text-lg font-semibold text-green-800 mb-2">
+            Identity Verified Successfully!
+          </h3>
+          <p className="text-green-700">
+            You can now complete your order securely.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <main className="p-6 bg-creamBg text-earthyBrownDark min-h-screen max-w-5xl mx-auto font-serif">
       <h1 className="font-heading text-3xl mb-8 text-[#b8860b] text-center tracking-wide">Checkout</h1>
 
       {/* User status indicator */}
       {isSignedIn && (
-        <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-3">
-          <p className="text-green-700 text-sm">
-            ✅ You are signed in. Your order will be saved to your account.
+        <div className={`mb-4 border rounded-lg p-3 ${
+          isVerified 
+            ? 'bg-green-50 border-green-200' 
+            : 'bg-yellow-50 border-yellow-200'
+        }`}>
+          <p className={`text-sm ${
+            isVerified ? 'text-green-700' : 'text-yellow-700'
+          }`}>
+            {isVerified 
+              ? '✅ Your account is verified. You can place orders securely.'
+              : '⚠️ Please verify your account to place orders.'
+            }
           </p>
         </div>
       )}
@@ -511,6 +726,9 @@ export default function Checkout() {
           </section>
         ) : (
           <>
+            {/* Verification Section */}
+            {requiresVerification && <VerificationSection />}
+
             {/* Progress Steps */}
             <div className="flex justify-between mb-8">
               {[1, 2, 3].map((stepNumber) => (
