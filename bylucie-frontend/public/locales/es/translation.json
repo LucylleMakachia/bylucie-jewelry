@@ -1,0 +1,13 @@
+{
+  "settings": "Configuración",
+  "enableNotifications": "Habilitar notificaciones",
+  "darkMode": "Modo oscuro",
+  "language": "Idioma",
+  "currency": "Moneda",
+  "saveSettings": "Guardar configuración",
+  "settingsSaved": "Configuración guardada con éxito.",
+  "settingsSaveFailed": "No se pudo guardar la configuración.",
+  "profile": "Perfil",
+  "editProfile": "Editar perfil",
+  "signOut": "Cerrar sesión"
+}

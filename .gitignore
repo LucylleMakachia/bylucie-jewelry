@@ -1,0 +1,29 @@
+# Git ignore rules 
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Builds
+dist/
+build/
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Jest
+coverage/
+
+# Backend data
+bylucie-backend/data/

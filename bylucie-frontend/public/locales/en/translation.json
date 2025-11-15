@@ -1,0 +1,13 @@
+{
+  "settings": "Settings",
+  "enableNotifications": "Enable Notifications",
+  "darkMode": "Dark Mode",
+  "language": "Language",
+  "currency": "Currency",
+  "saveSettings": "Save Settings",
+  "settingsSaved": "Settings saved successfully.",
+  "settingsSaveFailed": "Failed to save settings.",
+  "profile": "Profile",
+  "editProfile": "Edit Profile",
+  "signOut": "Sign Out"
+}

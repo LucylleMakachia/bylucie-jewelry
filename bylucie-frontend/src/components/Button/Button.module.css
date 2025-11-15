@@ -1,0 +1,15 @@
+.buttonBase {
+  @apply rounded-md px-6 py-2 font-semibold transition focus:outline focus:outline-4 focus:outline-sunGoldHighlight;
+}
+
+.primary {
+  @apply bg-sunGold text-creamBg hover:bg-sunGoldHighlight;
+}
+
+.secondary {
+  @apply bg-earthyBrownDark text-creamBg hover:bg-earthyBrownLight;
+}
+
+.outline {
+  @apply bg-transparent border border-sunGold text-sunGold hover:bg-sunGold hover:text-creamBg;
+}

@@ -1,0 +1,13 @@
+{
+  "settings": "Paramètres",
+  "enableNotifications": "Activer les notifications",
+  "darkMode": "Mode sombre",
+  "language": "Langue",
+  "currency": "Devise",
+  "saveSettings": "Enregistrer les paramètres",
+  "settingsSaved": "Paramètres enregistrés avec succès.",
+  "settingsSaveFailed": "Échec de l'enregistrement des paramètres.",
+  "profile": "Profil",
+  "editProfile": "Modifier le profil",
+  "signOut": "Déconnexion"
+}

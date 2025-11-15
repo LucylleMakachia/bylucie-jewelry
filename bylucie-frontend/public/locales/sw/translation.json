@@ -1,0 +1,13 @@
+{
+  "settings": "[translate:Mipangilio]",
+  "enableNotifications": "[translate:Washa Arifa]",
+  "darkMode": "[translate:Njia ya Giza]",
+  "language": "[translate:Lugha]",
+  "currency": "[translate:Sarafu]",
+  "saveSettings": "[translate:Hifadhi Mipangilio]",
+  "settingsSaved": "[translate:Mipangilio imerahisishwa kwa mafanikio.]",
+  "settingsSaveFailed": "[translate:Imeshindwa kuhifadhi mipangilio.]",
+  "profile": "[translate:Wasifu]",
+  "editProfile": "[translate:Hifadhi Wasifu]",
+  "signOut": "[translate:Toka]"
+}

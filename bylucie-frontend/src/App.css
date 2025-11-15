@@ -1,0 +1,131 @@
+/* Unified app.css */
+
+/* --- FONT IMPORTS --- */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display&family=Nunito&family=Poppins&family=Cormorant+Garamond:wght@300;400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap');
+
+/* --- BASE RESET --- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* --- CSS VARIABLES FOR COLORS & FONTS --- */
+:root {
+  --font-heading: 'Playfair Display', serif;
+  --font-body: 'Poppins', 'Nunito', sans-serif;
+
+  --color-sunGold: #E6A52D;
+  --color-sunGoldHighlight: #FFD700;
+  --color-earthyBrownDark: #3E2C23;
+  --color-earthyBrownLight: #6B4226;
+  --color-forestGreenDark: #52734D;
+  --color-forestGreenLight: #A5B68D;
+  --color-creamBg: #FAF3E0;
+
+  /* Light mode colors (default) */
+  --color-bg: #FAF3E0;
+  --color-text: #213547;
+  --color-surface: #f8f8f8;
+  --color-border: #e0e0e0;
+}
+
+/* --- DARK MODE OVERRIDES --- */
+.dark {
+  --color-bg: #121212;
+  --color-text: #f9fafb;
+  --color-surface: #1a1a1a;
+  --color-border: #333333;
+}
+
+/* --- BASE ELEMENT STYLES WITH TRANSITIONS --- */
+html, body {
+  width: 100%;
+  min-height: 100vh;
+  overflow-x: hidden;
+  font-family: var(--font-body);
+  line-height: 1.5;
+  font-weight: 400;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  color: var(--color-text);
+}
+
+/* Link styles */
+a {
+  font-weight: 500;
+  color: var(--color-sunGold);
+  text-decoration: inherit;
+  transition: color 0.2s;
+}
+
+a:hover {
+  color: var(--color-forestGreenLight);
+}
+
+/* Button styles */
+button {
+  font-family: var(--font-body);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  background-color: var(--color-earthyBrownDark);
+  cursor: pointer;
+  transition: all 0.25s;
+  color: var(--color-creamBg);
+}
+
+button:hover {
+  border-color: var(--color-sunGoldHighlight);
+  background-color: var(--color-earthyBrownLight);
+  transform: translateY(-1px);
+}
+
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+/* Card styles */
+.card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  transition: all 0.3s ease;
+}
+
+/* --- ANIMATIONS (optional) --- */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bounce-scale {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.bounce-hover:hover {
+  animation: bounce-scale 0.4s ease-in-out;
+}
