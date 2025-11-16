@@ -41,11 +41,13 @@ function App() {
   const [error, setError] = useState(null);
 
   const location = useLocation();
+  
+  // API Base URL - FIXED
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 
   // Simple toast function for basic notifications
   const showToast = (message, type = 'info') => {
     console.log(`Toast (${type}):`, message);
-    // You can replace this with your actual toast implementation
     if (typeof window !== 'undefined' && window.showToast) {
       window.showToast(message, type);
     }
@@ -56,20 +58,27 @@ function App() {
       setLoading(true);
       setError(null);
       
-      const res = await fetch('/api/products', {
-        credentials: 'include'
+      // FIXED: Use correct Flask endpoint
+      const res = await fetch(`${API_BASE_URL}/api/products`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
       
       if (!res.ok) {
-        if (res.status === 0) {
-          throw new Error('Cannot connect to server. Please check if backend is running.');
+        if (res.status === 0 || res.status === 404) {
+          throw new Error('Cannot connect to backend server. Please check if Flask server is running.');
         }
         throw new Error(`HTTP error! status: ${res.status}`);
       }
       
       const data = await res.json();
       
-      const sanitizedProducts = (data.products || data || []).map(product => {
+      // Handle both array and object responses
+      const productsArray = Array.isArray(data) ? data : (data.products || []);
+      
+      const sanitizedProducts = productsArray.map(product => {
         let imageUrl = '';
         let images = [];
         
@@ -96,7 +105,7 @@ function App() {
         const price = Number(product.price) || 0;
         
         return {
-          _id: product._id || product.id,
+          _id: product._id || product.id || `product-${Math.random()}`,
           name: product.name || 'Unnamed Product',
           description: product.description || 'No description available',
           price: price,
@@ -108,7 +117,7 @@ function App() {
           inStock: product.inStock !== undefined ? product.inStock : true,
           material: product.material || 'Unknown',
           color: product.color || 'Various',
-          stock: product.stock || 0,
+          stock: product.stock || product.stock_quantity || 0,
           ...product
         };
       });
@@ -117,8 +126,8 @@ function App() {
     } catch (err) {
       console.error('Failed to fetch products:', err);
       
-      if (err.message.includes('Failed to fetch')) {
-        setError('Backend server is not running. Please start your Express server.');
+      if (err.message.includes('Failed to fetch') || err.message.includes('Cannot connect')) {
+        setError('Backend server is not running. Please start your Flask server on port 5000.');
       } else {
         setError(`Cannot connect to server: ${err.message}`);
       }
@@ -174,9 +183,10 @@ function App() {
             <div className="text-sm text-gray-600 mt-2 p-3 bg-gray-50 rounded">
               <p className="font-medium">💡 Troubleshooting tips:</p>
               <ul className="list-disc list-inside mt-1 text-left">
-                <li>Make sure your backend server is running</li>
-                <li>Check if port 5000 is available</li>
-                <li>Verify the backend API endpoints</li>
+                <li>Make sure your Flask server is running on port 5000</li>
+                <li>Run: <code>python app.py</code> in your backend directory</li>
+                <li>Check if the Flask server started successfully</li>
+                <li>Verify the API endpoint: {API_BASE_URL}/api/products</li>
               </ul>
             </div>
           )}
@@ -190,12 +200,12 @@ function App() {
     products,
     getToken,
     showToast,
-    user
+    user,
+    onProductsUpdate: fetchProducts  // Add this for refreshing products
   };
 
   // Show products immediately, auth will load in background
   if (!isLoaded) {
-    // Return the full app structure but auth-dependent features won't work yet
     return (
       <I18nextProvider i18n={i18n}>
         <CurrencyProvider>
@@ -227,7 +237,7 @@ function App() {
                       ) : error ? (
                         <ErrorFallback error={error} onRetry={handleRetry} />
                       ) : (
-                        <Products products={products} getToken={getToken} showToast={showToast} user={null} />
+                        <Products {...commonProductProps} />
                       )
                     }
                   />
@@ -241,7 +251,7 @@ function App() {
                       ) : error ? (
                         <ErrorFallback error={error} onRetry={handleRetry} />
                       ) : (
-                        <ProductDetail products={products} getToken={getToken} showToast={showToast} user={null} />
+                        <ProductDetail {...commonProductProps} />
                       )
                     } 
                   />

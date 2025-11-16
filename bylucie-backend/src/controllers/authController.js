@@ -33,3 +33,132 @@ export async function loginUser(req, res) {
     res.status(500).json({ error: 'Server error' });
   }
 }
+
+// Send verification code for guest users
+export const sendGuestVerification = async (req, res) => {
+  try {
+    const { method, email, phone } = req.body;
+    
+    console.log(`🔐 Guest verification requested:`, { method, email, phone });
+
+    if (method === 'email' && email) {
+      // TODO: Implement actual email service
+      console.log(`📧 Sending email verification to: ${email}`);
+      
+      return res.json({
+        success: true,
+        message: 'Verification code sent to email',
+        method: 'email',
+        destination: email
+      });
+      
+    } else if (method === 'phone' && phone) {
+      // TODO: Implement actual SMS service
+      console.log(`📱 Sending SMS verification to: ${phone}`);
+      
+      return res.json({
+        success: true,
+        message: 'Verification code sent to phone',
+        method: 'phone', 
+        destination: phone
+      });
+      
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid verification method or missing contact info'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Guest verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send verification code'
+    });
+  }
+};
+
+// Verify guest user code
+export const verifyGuest = async (req, res) => {
+  try {
+    const { code, method, email, phone } = req.body;
+    
+    console.log(`🔐 Guest verification attempt:`, { method, code });
+
+    // TODO: Implement actual code validation
+    if (code && code.length === 6 && /^\d+$/.test(code)) {
+      return res.json({
+        success: true,
+        message: 'Identity verified successfully',
+        method,
+        verified: true
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid verification code'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Guest verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Verification failed'
+    });
+  }
+};
+
+// Send verification for authenticated users
+export const sendAccountVerification = async (req, res) => {
+  try {
+    const { method } = req.body;
+    
+    console.log(`🔐 Account verification requested:`, { method });
+
+    return res.json({
+      success: true,
+      message: `Verification code sent to your ${method}`,
+      method
+    });
+    
+  } catch (error) {
+    console.error('❌ Account verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send verification code'
+    });
+  }
+};
+
+// Verify authenticated user code
+export const verifyAccount = async (req, res) => {
+  try {
+    const { code, method } = req.body;
+    
+    console.log(`🔐 Account verification attempt:`, { method, code });
+
+    // TODO: Implement actual code validation
+    if (code && code.length === 6 && /^\d+$/.test(code)) {
+      return res.json({
+        success: true,
+        message: 'Account verified successfully',
+        method,
+        verified: true
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid verification code'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Account verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Verification failed'
+    });
+  }
+};

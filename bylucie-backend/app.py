@@ -15,7 +15,10 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
+from flask_cors import CORS
+from flask_migrate import Migrate
 import sqlalchemy
+from sqlalchemy import text, inspect
 
 # Redis import with error handling
 try:
@@ -25,11 +28,26 @@ except ImportError:
     print("Redis not installed. Run: pip install redis")
     REDIS_AVAILABLE = False
 
-# Africa's Talking import - REQUIRED
-import africastalking
+# Africa's Talking import with error handling
+AFRICASTALKING_AVAILABLE = False
+AFRICASTALKING_SMS = None
+try:
+    import africastalking
+    AFRICASTALKING_AVAILABLE = True
+    print("✅ Africa's Talking imported successfully")
+except ImportError as e:
+    print(f"❌ Africa's Talking import failed: {e}")
+    print("📱 SMS will use console fallback")
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Configure CORS
+CORS(app, 
+     origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174"],
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,6 +80,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Initialize extensions
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
+migrate = Migrate(app, db)
 
 # Initialize Redis (with fallback for development)
 REDIS_CLIENT = None
@@ -81,17 +100,22 @@ if REDIS_AVAILABLE:
 else:
     logger.warning("⚠️ Redis not available - using in-memory fallback")
 
-# Initialize Africa's Talking
-AFRICASTALKING_SMS = None
-try:
-    if AT_API_KEY and AT_USERNAME:
+# Initialize Africa's Talking if available
+if AFRICASTALKING_AVAILABLE and AT_API_KEY and AT_USERNAME and SMS_ENABLED:
+    try:
         africastalking.initialize(AT_USERNAME, AT_API_KEY)
         AFRICASTALKING_SMS = africastalking.SMS
         logger.info("✅ Africa's Talking initialized successfully")
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error("❌ Africa's Talking initialization failed: %s", e)
+        AFRICASTALKING_SMS = None
+else:
+    if not AFRICASTALKING_AVAILABLE:
+        logger.info("ℹ️ Africa's Talking package not available")
+    elif not SMS_ENABLED:
+        logger.info("ℹ️ SMS verification disabled via configuration")
     else:
-        logger.warning("⚠️ Africa's Talking API credentials not configured")
-except Exception as e:  # pylint: disable=broad-except
-    logger.error("❌ Africa's Talking initialization failed: %s", e)
+        logger.warning("⚠️ Africa's Talking not fully configured")
     AFRICASTALKING_SMS = None
 
 # In-memory fallback for development
@@ -189,6 +213,10 @@ class Product(db.Model):
     name = db.Column(db.String(200), nullable=False)
     price = db.Column(db.Float, nullable=False)
     stock_quantity = db.Column(db.Integer, default=0)
+    description = db.Column(db.Text)
+    category = db.Column(db.String(100))
+    material = db.Column(db.String(100))
+    color = db.Column(db.String(50))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -197,7 +225,12 @@ class Product(db.Model):
             'id': self.id,
             'name': self.name,
             'price': self.price,
-            'stock_quantity': self.stock_quantity
+            'stock_quantity': self.stock_quantity,
+            'description': self.description,
+            'category': self.category,
+            'material': self.material,
+            'color': self.color,
+            'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
 
@@ -277,12 +310,22 @@ def send_verification_sms(phone, code):
         message = f"Your verification code is: {code}. This code expires in 10 minutes."
 
         response = AFRICASTALKING_SMS.send(message, [phone], AT_SENDER_ID)
-
-        if response['SMSMessageData']['Recipients'][0]['status'] == 'Success':
-            logger.info("SMS sent successfully to %s", phone)
-            return True
+        
+        # More robust response handling
+        if (response and 
+            response.get('SMSMessageData') and 
+            response['SMSMessageData'].get('Recipients') and 
+            len(response['SMSMessageData']['Recipients']) > 0):
+            
+            recipient_status = response['SMSMessageData']['Recipients'][0].get('status', 'Unknown')
+            if recipient_status == 'Success':
+                logger.info("SMS sent successfully to %s", phone)
+                return True
+            else:
+                logger.error("Failed to send SMS to %s: Status %s", phone, recipient_status)
+                return False
         else:
-            logger.error("Failed to send SMS to %s: %s", phone, response)
+            logger.error("Unexpected response format from Africa's Talking: %s", response)
             return False
 
     except Exception as e:  # pylint: disable=broad-except
@@ -290,9 +333,61 @@ def send_verification_sms(phone, code):
         return False
 
 
-# Create tables
-with app.app_context():
-    db.create_all()
+def init_database():
+    """Initialize database tables safely."""
+    with app.app_context():
+        try:
+            # Check if tables exist
+            inspector = inspect(db.engine)
+            existing_tables = inspector.get_table_names()
+            
+            if not existing_tables:
+                logger.info("Creating database tables...")
+                db.create_all()
+                logger.info("Database tables created successfully")
+            else:
+                logger.info("Database tables already exist")
+                
+        except Exception as e:
+            logger.error("Database initialization error: %s", e)
+            raise
+
+
+# Initialize database
+init_database()
+
+
+@app.route('/api/products', methods=['GET'])
+def get_products():
+    """Get all products."""
+    try:
+        products = Product.query.all()
+        products_data = []
+        
+        for product in products:
+            product_data = {
+                'id': product.id,
+                'name': product.name,
+                'price': float(product.price),
+                'stock_quantity': product.stock_quantity,
+                'description': product.description or '',
+                'category': product.category or 'Uncategorized',
+                'inStock': product.stock_quantity > 0,
+                'stock': product.stock_quantity,
+                'images': ['/images/placeholder.jpg'],
+                'imageUrl': '/images/placeholder.jpg',
+                'rating': 0,
+                'reviewCount': 0,
+                'material': product.material or 'Unknown',
+                'color': product.color or 'Various'
+            }
+            products_data.append(product_data)
+        
+        logger.info("Fetched %d products", len(products_data))
+        return jsonify(products_data)
+    except Exception as e:
+        logger.error("Error fetching products: %s", e)
+        return jsonify({"error": "Failed to fetch products"}), 500
 
 
 @app.route('/api/auth/send-guest-verification', methods=['POST'])
@@ -860,7 +955,7 @@ def health_check():
     # Test database connection
     db_status = "healthy"
     try:
-        db.session.execute('SELECT 1')
+        db.session.execute(text('SELECT 1'))
     except sqlalchemy.exc.SQLAlchemyError as e:
         db_status = f"unhealthy: {str(e)}"
         logger.error("Database health check failed: %s", e)
@@ -882,4 +977,4 @@ def health_check():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5001, host='127.0.0.1')

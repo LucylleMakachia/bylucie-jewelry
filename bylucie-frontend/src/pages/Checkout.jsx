@@ -56,7 +56,7 @@ export default function Checkout() {
 
   // Check if verification is required
   useEffect(() => {
-    if (isSignedIn && !isVerified) {
+    if ((isSignedIn && !isVerified) || (!isSignedIn && !isVerified)) {
       setRequiresVerification(true);
     }
   }, [isSignedIn, isVerified]);
@@ -159,11 +159,11 @@ export default function Checkout() {
       
       const payload = {
         method: verificationMethod,
-        email: shippingInfo.email,
-        phone: shippingInfo.phone,
-        isSignedIn,
-        userId: isSignedIn ? userId : null
+        ...(verificationMethod === 'email' && { email: shippingInfo.email }),
+        ...(verificationMethod === 'phone' && { phone: shippingInfo.phone }),
       };
+
+      console.log('🔐 Sending verification request:', payload);
 
       const endpoint = isSignedIn 
         ? `${API_BASE_URL}/api/auth/send-account-verification`
@@ -177,14 +177,17 @@ export default function Checkout() {
         body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        setVerificationStep('code');
-        toast.success(`Verification code sent to your ${verificationMethod}`);
-      } else {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Failed to send verification code');
+      const responseData = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(responseData.error || 'Failed to send verification code');
       }
+
+      setVerificationStep('code');
+      toast.success(`Verification code sent to your ${verificationMethod}`);
+      
     } catch (error) {
+      console.error('❌ Verification send error:', error);
       toast.error(`Failed to send verification: ${error.message}`);
     } finally {
       setVerificationLoading(false);
@@ -199,11 +202,11 @@ export default function Checkout() {
       const payload = {
         code: verificationCode,
         method: verificationMethod,
-        email: shippingInfo.email,
-        phone: shippingInfo.phone,
-        isSignedIn,
-        userId: isSignedIn ? userId : null
+        ...(verificationMethod === 'email' && { email: shippingInfo.email }),
+        ...(verificationMethod === 'phone' && { phone: shippingInfo.phone }),
       };
+
+      console.log('🔐 Verifying code with payload:', payload);
 
       const endpoint = isSignedIn 
         ? `${API_BASE_URL}/api/auth/verify-account`
@@ -217,16 +220,19 @@ export default function Checkout() {
         body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        setIsVerified(true);
-        setVerificationStep('complete');
-        setRequiresVerification(false);
-        toast.success('Identity verified successfully!');
-      } else {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Invalid verification code');
+      const responseData = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(responseData.error || 'Invalid verification code');
       }
+
+      setIsVerified(true);
+      setVerificationStep('complete');
+      setRequiresVerification(false);
+      toast.success('Identity verified successfully!');
+      
     } catch (error) {
+      console.error('❌ Verification error:', error);
       toast.error(`Verification failed: ${error.message}`);
     } finally {
       setVerificationLoading(false);
@@ -323,7 +329,7 @@ export default function Checkout() {
     }
 
     // Check if verification is required
-    if ((!isSignedIn && !isVerified) || (isSignedIn && requiresVerification)) {
+    if (!isVerified) {
       setRequiresVerification(true);
       toast.info('Identity verification required for order security');
       return;
@@ -367,7 +373,7 @@ export default function Checkout() {
         createdAt: new Date().toISOString(),
         isGuestOrder: !isSignedIn,
         userId: isSignedIn ? userId : null,
-        userVerified: isSignedIn ? isVerified : false,
+        userVerified: isVerified,
         verificationMethod: isVerified ? verificationMethod : null
       };
 
