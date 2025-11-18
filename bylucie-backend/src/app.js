@@ -13,7 +13,7 @@ import { validateRegister } from './middleware/validateRegister.js';
 import { trackPageView } from './middleware/analytics.js';
 import { clerkAuthMiddleware, authenticateClerk, attachClerkUser, requireAdmin } from './middleware/clerkAuth.js';
 
-import verificationRoutes from './routes/verification.js';
+// REMOVED: verificationRoutes import (causes SendGrid error)
 import authRoutes from './routes/auth.js';
 import productsRoutes from './routes/products.js';
 import ordersRoutes from './routes/orders.js';
@@ -155,14 +155,16 @@ app.get('/api/status', (req, res) => {
       stockValidation: true,
       reviews: true,
       wishlist: true,
-      fileUpload: true
+      fileUpload: true,
+      // UPDATED: Added verification feature through auth routes
+      verification: true
     },
     endpoints: {
       public: [
         '/api/products', 
         '/api/products/stock-check',
         '/api/auth', 
-        '/api/verification', 
+        // REMOVED: '/api/verification' (moved to auth routes)
         '/api/orders/guest', 
         '/api/external',
         '/api/reviews',
@@ -221,7 +223,7 @@ app.get('/api/health', (req, res) => {
 
 // ========== PUBLIC ROUTES (no authentication required) ==========
 
-app.use('/api/verification', verificationRoutes);
+// REMOVED: app.use('/api/verification', verificationRoutes); (causes SendGrid error)
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productsRoutes);
 // Public reviews route - must be before protected routes
@@ -502,7 +504,7 @@ app.use((req, res) => {
       'GET /',
       'POST /api/admin/debug-test',
       'POST /api/orders/guest',
-      'GET /api/orders/guest/debug', // ADDED
+      'GET /api/orders/guest/debug',
       'GET /api/external/ipapi',
       'GET /api/reviews',
       'GET /api/upload/debug',
